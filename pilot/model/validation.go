@@ -1113,6 +1113,11 @@ func ValidateDestinationPolicy(msg proto.Message) error {
 	return errs
 }
 
+// ValidateDestinationPolicy checks proxy policies
+func ValidateDestinationPolicyV2(msg proto.Message) error {
+	//TODO
+}
+
 // ValidateProxyAddress checks that a network address is well-formed
 func ValidateProxyAddress(hostAddr string) error {
 	colon := strings.Index(hostAddr, ":")

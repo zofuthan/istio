@@ -345,6 +345,13 @@ var (
 		Validate:    ValidateDestinationPolicy,
 	}
 
+	V1alpha2DestinationPolicy = ProtoSchema{
+		Type:        "v1alpha2-destination-policy",
+		Plural:      "v1alpha2-destination-policies",
+		MessageName: "istio.routing.v1alpha2.DestinationPolicy",
+		Validate:    ValidateDestinationPolicyV2,
+	}
+
 	// HTTPAPISpec describes an HTTP API specification.
 	HTTPAPISpec = ProtoSchema{
 		Type:        "http-api-spec",

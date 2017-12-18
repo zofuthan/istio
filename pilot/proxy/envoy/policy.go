@@ -20,6 +20,7 @@ package envoy
 import (
 	meshconfig "istio.io/api/mesh/v1alpha1"
 	routing "istio.io/api/routing/v1alpha1"
+	routingv2 "istio.io/api/routing/v1alpha2"
 	"istio.io/istio/pilot/model"
 	"istio.io/istio/pilot/proxy"
 )
@@ -64,6 +65,22 @@ func applyClusterPolicy(cluster *Cluster,
 	policyConfig := config.Policy(instances, cluster.hostname, cluster.tags)
 
 	if policyConfig == nil {
+
+		// check for v1alpha2 destination rules
+		policyConfigs, err := config.List(model.V1alpha2DestinationPolicy, model.NamespaceAll)
+		if err != nil {
+			for _, policy := range policyConfigs {
+				destPolicy := policy.Spec.(*routingv2.DestinationRule)
+
+				// TODO match service cluster name with DestinationRule.Name?
+
+				// TODO perform DestinationRule.Subset check?
+
+				if destPolicy.TrafficPolicy != nil {
+					applyV2ClusterPolicy(destPolicy, cluster)
+				}
+			}
+		}
 		return
 	}
 
@@ -115,6 +132,71 @@ func applyClusterPolicy(cluster *Cluster,
 		}
 		if cbconfig.HttpMaxEjectionPercent > 0 {
 			cluster.OutlierDetection.MaxEjectionPercent = int(cbconfig.HttpMaxEjectionPercent)
+		}
+	}
+}
+
+//
+func applyV2ClusterPolicy(destPolicy *routingv2.DestinationRule, cluster *Cluster) {
+	if cluster.Type != ClusterTypeOriginalDST {
+		switch destPolicy.TrafficPolicy.LbPolicy {
+		case routingv2.TrafficPolicy_ROUND_ROBIN:
+			cluster.LbType = LbTypeRoundRobin
+		case routingv2.TrafficPolicy_LEAST_CONN:
+			cluster.LbType = LbTypeLeastRequest
+		case routingv2.TrafficPolicy_RANDOM, routingv2.TrafficPolicy_DEFAULT:
+			cluster.LbType = LbTypeRandom
+		}
+	}
+
+	if destPolicy.TrafficPolicy.ConnectionPool != nil {
+		// Envoy's circuit breaker is a combination of its circuit breaker (which is actually a bulk head)
+		// outlier detection (which is per pod circuit breaker)
+		cluster.CircuitBreaker = &CircuitBreaker{}
+
+		if destPolicy.TrafficPolicy.ConnectionPool.Http != nil {
+
+			if destPolicy.TrafficPolicy.ConnectionPool.Http.MaxRequests > 0 {
+				cluster.CircuitBreaker.Default.MaxRequests = int(destPolicy.TrafficPolicy.ConnectionPool.Http.MaxRequests)
+			}
+			if destPolicy.TrafficPolicy.ConnectionPool.Http.MaxPendingRequests > 0 {
+				cluster.CircuitBreaker.Default.MaxPendingRequests = int(destPolicy.TrafficPolicy.ConnectionPool.Http.MaxPendingRequests)
+			}
+
+			if destPolicy.TrafficPolicy.ConnectionPool.Http.MaxRequestsPerConnection > 0 {
+				cluster.MaxRequestsPerConnection = destPolicy.TrafficPolicy.ConnectionPool.Http.MaxRequestsPerConnection
+			}
+		}
+
+		if destPolicy.TrafficPolicy.ConnectionPool.Tcp != nil {
+			if destPolicy.TrafficPolicy.ConnectionPool.Tcp.MaxConnections > 0 {
+				cluster.CircuitBreaker.Default.MaxConnections = int(destPolicy.TrafficPolicy.ConnectionPool.Tcp.MaxConnections)
+			}
+
+			if destPolicy.TrafficPolicy.ConnectionPool.Tcp.ConnectTimeout > 0 {
+				cluster.ConnectTimeoutMs = protoDurationToMS(destPolicy.TrafficPolicy.ConnectionPool.Tcp.ConnectTimeout)
+			}
+		}
+	}
+
+	if destPolicy.TrafficPolicy.OutlierDetection != nil && destPolicy.TrafficPolicy.OutlierDetection.Http != nil{
+
+		//TODO: need to add max_retries as well. Currently it defaults to 3
+
+		cluster.OutlierDetection = &OutlierDetection{}
+
+		cluster.OutlierDetection.MaxEjectionPercent = 10
+		if destPolicy.TrafficPolicy.OutlierDetection.Http.BaseEjectionTime > 0 {
+			cluster.OutlierDetection.BaseEjectionTimeMS = protoDurationToMS(destPolicy.TrafficPolicy.OutlierDetection.Http.BaseEjectionTime)
+		}
+		if destPolicy.TrafficPolicy.OutlierDetection.Http.ConsecutiveErrors > 0 {
+			cluster.OutlierDetection.ConsecutiveErrors = int(destPolicy.TrafficPolicy.OutlierDetection.Http.ConsecutiveErrors)
+		}
+		if destPolicy.TrafficPolicy.OutlierDetection.Http.Interval > 0 {
+			cluster.OutlierDetection.IntervalMS = protoDurationToMS(destPolicy.TrafficPolicy.OutlierDetection.Http.Interval)
+		}
+		if destPolicy.TrafficPolicy.OutlierDetection.Http.MaxEjectionPercent > 0 {
+			cluster.OutlierDetection.MaxEjectionPercent = int(destPolicy.TrafficPolicy.OutlierDetection.Http.GetMaxEjectionPercent())
 		}
 	}
 }

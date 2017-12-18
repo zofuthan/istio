@@ -624,6 +624,7 @@ func newClient() (*crd.Client, error) {
 		model.Gateway,
 		model.EgressRule,
 		model.DestinationPolicy,
+		model.V1alpha2DestinationPolicy,
 		model.HTTPAPISpec,
 		model.HTTPAPISpecBinding,
 		model.QuotaSpec,
